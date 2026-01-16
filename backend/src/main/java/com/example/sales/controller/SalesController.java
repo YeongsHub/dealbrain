@@ -1,9 +1,11 @@
 package com.example.sales.controller;
 
 import com.example.sales.model.dto.AnalyzeResponse;
+import com.example.sales.model.entity.User;
 import com.example.sales.service.SalesService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -18,9 +20,10 @@ public class SalesController {
 
     @PostMapping("/analyze")
     public ResponseEntity<AnalyzeResponse> analyze(
-            @RequestParam("files") List<MultipartFile> files
+            @RequestParam("files") List<MultipartFile> files,
+            @AuthenticationPrincipal User user
     ) {
-        AnalyzeResponse response = salesService.analyze(files);
+        AnalyzeResponse response = salesService.analyze(files, user);
         return ResponseEntity.ok(response);
     }
 }

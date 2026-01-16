@@ -1,12 +1,15 @@
 package com.example.sales.service;
 
 import com.example.sales.model.dto.*;
+import com.example.sales.model.entity.Deal;
+import com.example.sales.model.entity.User;
+import com.example.sales.repository.DealRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,10 +19,16 @@ import java.util.List;
 public class SalesService {
 
     private final FileService fileService;
+    private final CsvParsingService csvParsingService;
+    private final ProbabilityCalculationService probabilityCalculationService;
+    private final NbaGenerationService nbaGenerationService;
+    private final DealRepository dealRepository;
 
-    public AnalyzeResponse analyze(List<MultipartFile> files) {
+    @Transactional
+    public AnalyzeResponse analyze(List<MultipartFile> files, User user) {
         List<FileInfo> fileInfos = new ArrayList<>();
-        List<DealAnalysisResponse> deals = new ArrayList<>();
+        List<DealAnalysisResponse> dealResponses = new ArrayList<>();
+        List<Deal> allDeals = new ArrayList<>();
 
         for (MultipartFile file : files) {
             try {
@@ -33,9 +42,10 @@ public class SalesService {
                         .build();
                 fileInfos.add(fileInfo);
 
-                // Mock: Generate sample deals for each file
+                // Parse CSV files and extract deals
                 if (fileService.isCsvFile(file)) {
-                    deals.addAll(generateMockDeals());
+                    List<Deal> parsedDeals = csvParsingService.parseCsvFile(file, user);
+                    allDeals.addAll(parsedDeals);
                 }
                 // PDF files will be processed for RAG in Stage 4
 
@@ -48,132 +58,74 @@ public class SalesService {
                         .status("FAILED")
                         .build();
                 fileInfos.add(failedFile);
+                throw e; // Re-throw to allow transaction rollback
             }
         }
 
-        AnalysisSummary summary = calculateSummary(deals);
+        // Save all parsed deals to database
+        List<Deal> savedDeals = dealRepository.saveAll(allDeals);
+        log.info("Saved {} deals for user {}", savedDeals.size(), user.getEmail());
+
+        // Calculate probability and generate NBA for each deal
+        for (Deal deal : savedDeals) {
+            DealAnalysisResponse response = convertToDealAnalysisResponse(deal);
+            dealResponses.add(response);
+        }
+
+        AnalysisSummary summary = calculateSummary(dealResponses);
 
         return AnalyzeResponse.builder()
                 .files(fileInfos)
-                .deals(deals)
+                .deals(dealResponses)
                 .summary(summary)
                 .build();
     }
 
-    private List<DealAnalysisResponse> generateMockDeals() {
-        List<DealAnalysisResponse> deals = new ArrayList<>();
+    private DealAnalysisResponse convertToDealAnalysisResponse(Deal deal) {
+        ProbabilityResult probability = probabilityCalculationService.calculateProbability(deal);
+        List<NextBestAction> actions = nbaGenerationService.generateActions(deal);
 
-        // Mock Deal 1
-        deals.add(DealAnalysisResponse.builder()
-                .dealId("DEAL-0001")
-                .companyName("Samsung Electronics")
+        return DealAnalysisResponse.builder()
+                .dealId(deal.getDealId())
+                .companyName(deal.getCompanyName())
                 .contactInfo(ContactInfo.builder()
-                        .name("James Kim")
-                        .email("james.kim@samsung.com")
-                        .title("Senior Manager")
+                        .name(deal.getContactName())
+                        .email(deal.getContactEmail())
+                        .title(deal.getContactTitle())
                         .build())
-                .dealStage("Qualification")
-                .dealValue(500000L)
+                .dealStage(formatDealStage(deal.getDealStage().name()))
+                .dealValue(deal.getDealValue().longValue())
                 .currency("KRW")
-                .lastContact(LocalDate.now().minusDays(3))
-                .nextMeeting(LocalDate.now().plusDays(4))
-                .probability(ProbabilityResult.builder()
-                        .successRate(35)
-                        .confidenceLevel("Medium")
-                        .factors(ProbabilityFactors.builder()
-                                .positive(List.of(
-                                        "Budget approved",
-                                        "Technical review scheduled",
-                                        "POC requested by customer"
-                                ))
-                                .negative(List.of(
-                                        "Still in early Qualification stage",
-                                        "Strong competitor (Microsoft Azure) present"
-                                ))
-                                .build())
-                        .build())
-                .painPoints("Data silos causing slow analytics performance")
-                .competition("Microsoft Azure")
-                .decisionMaker("CTO")
-                .budgetStatus("Approved")
-                .nextBestActions(List.of(
-                        NextBestAction.builder()
-                                .priority(1)
-                                .action("Schedule POC kick-off meeting within 5 days")
-                                .rationale("Customer explicitly requested POC - demonstrate value quickly")
-                                .deadline(LocalDate.now().plusDays(5))
-                                .build(),
-                        NextBestAction.builder()
-                                .priority(2)
-                                .action("Prepare comparative analysis vs Microsoft Azure")
-                                .rationale("Address competition proactively")
-                                .deadline(LocalDate.now().plusDays(7))
-                                .build(),
-                        NextBestAction.builder()
-                                .priority(3)
-                                .action("Identify additional stakeholders beyond CTO")
-                                .rationale("Expand influence to de-risk single-threaded dependency")
-                                .deadline(LocalDate.now().plusDays(10))
-                                .build()
-                ))
-                .salesRep("John Smith")
-                .region("Seoul")
-                .notes("Technical review meeting scheduled. POC requested.")
-                .build());
+                .lastContact(deal.getLastContact())
+                .nextMeeting(deal.getNextMeeting())
+                .probability(probability)
+                .painPoints(deal.getPainPoints())
+                .competition(deal.getCompetition())
+                .decisionMaker(deal.getDecisionMaker())
+                .budgetStatus(formatBudgetStatus(deal.getBudgetStatus().name()))
+                .nextBestActions(actions)
+                .salesRep(deal.getSalesRep())
+                .region(deal.getRegion())
+                .notes(deal.getNotes())
+                .build();
+    }
 
-        // Mock Deal 2
-        deals.add(DealAnalysisResponse.builder()
-                .dealId("DEAL-0002")
-                .companyName("LG Display")
-                .contactInfo(ContactInfo.builder()
-                        .name("Sarah Lee")
-                        .email("sarah.lee@lgdisplay.com")
-                        .title("IT Director")
-                        .build())
-                .dealStage("Proposal")
-                .dealValue(850000L)
-                .currency("KRW")
-                .lastContact(LocalDate.now().minusDays(7))
-                .nextMeeting(LocalDate.now().plusDays(2))
-                .probability(ProbabilityResult.builder()
-                        .successRate(55)
-                        .confidenceLevel("Medium")
-                        .factors(ProbabilityFactors.builder()
-                                .positive(List.of(
-                                        "Proposal submitted and under review",
-                                        "Budget confirmed",
-                                        "Strong technical fit identified"
-                                ))
-                                .negative(List.of(
-                                        "Procurement process may take longer",
-                                        "Internal reorganization pending"
-                                ))
-                                .build())
-                        .build())
-                .painPoints("Legacy system integration challenges")
-                .competition("Oracle Cloud")
-                .decisionMaker("CIO")
-                .budgetStatus("Under Review")
-                .nextBestActions(List.of(
-                        NextBestAction.builder()
-                                .priority(1)
-                                .action("Follow up on proposal review status")
-                                .rationale("7 days since last contact - maintain momentum")
-                                .deadline(LocalDate.now().plusDays(1))
-                                .build(),
-                        NextBestAction.builder()
-                                .priority(2)
-                                .action("Prepare executive summary for CIO presentation")
-                                .rationale("Scheduled meeting in 2 days requires preparation")
-                                .deadline(LocalDate.now().plusDays(1))
-                                .build()
-                ))
-                .salesRep("Emily Park")
-                .region("Gyeonggi")
-                .notes("Awaiting final budget approval. CIO meeting scheduled.")
-                .build());
+    private String formatDealStage(String stage) {
+        // Convert CLOSED_WON -> Closed Won, QUALIFICATION -> Qualification
+        return switch (stage) {
+            case "CLOSED_WON" -> "Closed Won";
+            case "CLOSED_LOST" -> "Closed Lost";
+            default -> stage.substring(0, 1) + stage.substring(1).toLowerCase();
+        };
+    }
 
-        return deals;
+    private String formatBudgetStatus(String status) {
+        // Convert UNDER_REVIEW -> Under Review, NOT_CONFIRMED -> Not Confirmed
+        return switch (status) {
+            case "UNDER_REVIEW" -> "Under Review";
+            case "NOT_CONFIRMED" -> "Not Confirmed";
+            default -> status.substring(0, 1) + status.substring(1).toLowerCase();
+        };
     }
 
     private AnalysisSummary calculateSummary(List<DealAnalysisResponse> deals) {

@@ -34,6 +34,26 @@ public class GlobalExceptionHandler {
         return buildErrorResponse("FILE_SIZE_EXCEEDED", ex.getMessage(), HttpStatus.PAYLOAD_TOO_LARGE);
     }
 
+    @ExceptionHandler(CsvParsingException.class)
+    public ResponseEntity<Map<String, Object>> handleCsvParsingException(CsvParsingException ex) {
+        return buildErrorResponse("CSV_PARSING_ERROR", ex.getMessage(), HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(CsvValidationException.class)
+    public ResponseEntity<Map<String, Object>> handleCsvValidationException(CsvValidationException ex) {
+        Map<String, Object> error = new HashMap<>();
+        error.put("code", "CSV_VALIDATION_ERROR");
+        error.put("message", ex.getMessage());
+        error.put("rowNumber", ex.getRowNumber());
+        error.put("fieldErrors", ex.getFieldErrors());
+        error.put("timestamp", Instant.now().toString());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("error", error);
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidationExceptions(MethodArgumentNotValidException ex) {
         Map<String, String> fieldErrors = new HashMap<>();
