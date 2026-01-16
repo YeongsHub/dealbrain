@@ -1,0 +1,29 @@
+# ===========================================
+# AI Sales Brain - Docker Compose (Local Dev)
+# ===========================================
+# Usage: docker compose up -d
+
+services:
+  # PostgreSQL with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: salesbrain-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: salesbrain
+      POSTGRES_USER: salesbrain
+      POSTGRES_PASSWORD: salesbrain
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salesbrain -d salesbrain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local
