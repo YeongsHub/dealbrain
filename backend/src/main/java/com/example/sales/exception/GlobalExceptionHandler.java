@@ -54,6 +54,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
+    @ExceptionHandler(PdfExtractionException.class)
+    public ResponseEntity<Map<String, Object>> handlePdfExtractionException(PdfExtractionException ex) {
+        return buildErrorResponse("PDF_EXTRACTION_ERROR", ex.getMessage(), HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(EmbeddingGenerationException.class)
+    public ResponseEntity<Map<String, Object>> handleEmbeddingGenerationException(EmbeddingGenerationException ex) {
+        return buildErrorResponse("EMBEDDING_ERROR", ex.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidationExceptions(MethodArgumentNotValidException ex) {
         Map<String, String> fieldErrors = new HashMap<>();

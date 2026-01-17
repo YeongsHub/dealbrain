@@ -2,6 +2,7 @@ package com.example.sales.service;
 
 import com.example.sales.model.dto.*;
 import com.example.sales.model.entity.Deal;
+import com.example.sales.model.entity.Document;
 import com.example.sales.model.entity.User;
 import com.example.sales.repository.DealRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ public class SalesService {
     private final ProbabilityCalculationService probabilityCalculationService;
     private final NbaGenerationService nbaGenerationService;
     private final DealRepository dealRepository;
+    private final DocumentProcessingService documentProcessingService;
 
     @Transactional
     public AnalyzeResponse analyze(List<MultipartFile> files, User user) {
@@ -47,7 +49,15 @@ public class SalesService {
                     List<Deal> parsedDeals = csvParsingService.parseCsvFile(file, user);
                     allDeals.addAll(parsedDeals);
                 }
-                // PDF files will be processed for RAG in Stage 4
+
+                // Process PDF files for RAG
+                if (fileService.isPdfFile(file)) {
+                    Document document = documentProcessingService.createDocument(file, user, null);
+                    documentProcessingService.processDocumentAsync(document.getId(), file, user);
+                    // Update status to indicate async processing
+                    fileInfos.get(fileInfos.size() - 1).setStatus("PROCESSING");
+                    log.info("Started async processing for PDF: {}", file.getOriginalFilename());
+                }
 
             } catch (Exception e) {
                 log.error("Failed to process file: {}", file.getOriginalFilename(), e);
